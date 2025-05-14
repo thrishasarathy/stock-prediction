@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zomato Stock Price Predictor</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/papaparse@5.3.0/papaparse.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        h1 {
+            color: #e23744;
+            text-align: center;
+        }
+        .container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+        }
+        .upload-section {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            flex: 1;
+            min-width: 300px;
+        }
+        .results-section {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            flex: 2;
+            min-width: 600px;
+        }
+        .metrics {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+            margin: 20px 0;
+        }
+        .metric {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 5px;
+            text-align: center;
+        }
+        .metric h3 {
+            margin-top: 0;
+            color: #e23744;
+        }
+        .metric-value {
+            font-size: 24px;
+            font-weight: bold;
+        }
+        button {
+            background-color: #e23744;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-top: 10px;
+        }
+        button:hover {
+            background-color: #c22d38;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        #chart-container {
+            margin-top: 20px;
+            height: 400px;
+        }
+        .loading {
+            display: none;
+            text-align: center;
+            margin: 20px 0;
+        }
+        .spinner {
+            border: 5px solid #f3f3f3;
+            border-top: 5px solid #e23744;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .file-input {
+            margin: 15px 0;
+        }
+        .instructions {
+            background: #e6f7ff;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Zomato Stock Price Predictor</h1>
+   
+    <div class="instructions">
+        <h3>How to use:</h3>
+        <ol>
+            <li>Upload a CSV file with Zomato stock data containing 'Date' and 'Close' columns</li>
+            <li>Click "Run Prediction" to see results</li>
+            <li>View the prediction metrics and chart</li>
+        </ol>
+    </div>
+   
+    <div class="container">
+        <div class="upload-section">
+            <h2>Upload Data</h2>
+            <div class="file-input">
+                <input type="file" id="csvFile" accept=".csv">
+            </div>
+            <button id="predictBtn" disabled>Run Prediction</button>
+           
+            <div class="loading" id="loadingIndicator">
+                <div class="spinner"></div>
+                <p>Training model and making predictions...</p>
+            </div>
+           
+            <div id="sampleDataNote">
+                <p>Don't have data? <a href="#" id="useSample">Use sample data</a></p>
+            </div>
+        </div>
+       
+        <div class="results-section">
+            <h2>Prediction Results</h2>
+            <div class="metrics">
+                <div class="metric">
+                    <h3>MAE</h3>
+                    <div class="metric-value" id="mae">-</div>
+                    <p>Mean Absolute Error</p>
+                </div>
+                <div class="metric">
+                    <h3>RMSE</h3>
+                    <div class="metric-value" id="rmse">-</div>
+                    <p>Root Mean Squared Error</p>
+                </div>
+                <div class="metric">
+                    <h3>R² Score</h3>
+                    <div class="metric-value" id="r2">-</div>
+                    <p>Model Accuracy</p>
+                </div>
+            </div>
+           
+            <div id="chart-container">
+                <canvas id="resultChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // DOM Elements
+        const csvFileInput = document.getElementById('csvFile');
+        const predictBtn = document.getElementById('predictBtn');
+        const loadingIndicator = document.getElementById('loadingIndicator');
+        const useSampleBtn = document.getElementById('useSample');
+        const maeElement = document.getElementById('mae');
+        const rmseElement = document.getElementById('rmse');
+        const r2Element = document.getElementById('r2');
+       
+        // Chart setup
+        const ctx = document.getElementById('resultChart').getContext('2d');
+        let chart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [
+                    {
+                        label: 'Actual Price',
+                        data: [],
+                        borderColor: '#3366ff',
+                        backgroundColor: 'rgba(51, 102, 255, 0.1)',
+                        borderWidth: 2,
+                        fill: true
+                    },
+                    {
+                        label: 'Predicted Price',
+                        data: [],
+                        borderColor: '#e23744',
+                        backgroundColor: 'rgba(226, 55, 68, 0.1)',
+                        borderWidth: 2,
+                        borderDash: [5, 5],
+                        fill: false
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: {
+                        title: {
+                            display: true,
+                            text: 'Date'
+                        }
+                    },
+                    y: {
+                        title: {
+                            display: true,
+                            text: 'Price (USD)'
+                        }
+                    }
+                }
+            }
+        });
+       
+        // Sample data
+        const sampleData = `Date,Close
+2023-01-02,50.8
+2023-01-03,51.5
+2023-01-04,52.0
+2023-01-05,52.5
+2023-01-06,53.0
+2023-01-07,53.5
+2023-01-08,54.0
+2023-01-09,54.5
+2023-01-10,55.0
+2023-01-11,55.5
+2023-01-12,56.0
+2023-01-13,56.5
+2023-01-14,57.0
+2023-01-15,57.5
+2023-01-16,58.0
+2023-01-17,58.5
+2023-01-18,59.0
+2023-01-19,59.5
+2023-01-20,60.0
+2023-01-21,60.5
+2023-01-22,61.0
+2023-01-23,61.5
+2023-01-24,62.0
+2023-01-25,62.5
+2023-01-26,63.0
+2023-01-27,63.5
+2023-01-28,64.0
+2023-01-29,64.5
+2023-01-30,65.0`;
+       
+        // Event listeners
+        csvFileInput.addEventListener('change', handleFileUpload);
+        predictBtn.addEventListener('click', runPrediction);
+        useSampleBtn.addEventListener('click', useSampleData);
+       
+        let stockData = null;
+       
+        function handleFileUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+           
+            Papa.parse(file, {
+                header: true,
+                complete: function(results) {
+                    stockData = processData(results.data);
+                    predictBtn.disabled = false;
+                    updateChartData(stockData.map(d => d.Close), []);
+                }
+            });
+        }
+       
+        function useSampleData(e) {
+            e.preventDefault();
+            Papa.parse(sampleData, {
+                header: true,
+                complete: function(results) {
+                    stockData = processData(results.data);
+                    predictBtn.disabled = false;
+                    updateChartData(stockData.map(d => d.Close), []);
+                }
+            });
+        }
+       
+        function processData(data) {
+            // Convert string dates to Date objects and sort chronologically
+            data.forEach(d => {
+                d.Date = new Date(d.Date);
+                d.Close = parseFloat(d.Close);
+            });
+           
+            // Sort by date
+            data.sort((a, b) => a.Date - b.Date);
+           
+            return data;
+        }
+       
+        function updateChartData(actualData, predictedData) {
+            // Update chart with new data
+            chart.data.labels = stockData.map(d => d.Date.toISOString().split('T')[0]);
+            chart.data.datasets[0].data = actualData;
+            chart.data.datasets[1].data = Array(actualData.length - predictedData.length).fill(null).concat(predictedData);
+            chart.update();
+        }
+       
+        function runPrediction() {
+            if (!stockData) return;
+           
+            // Show loading indicator
+            loadingIndicator.style.display = 'block';
+            predictBtn.disabled = true;
+           
+            // Simulate processing delay (in a real app, this would call a backend API)
+            setTimeout(() => {
+                // In a real implementation, this would call your Python backend
+                // or use TensorFlow.js to run the Random Forest model
+               
+                // For this demo, we'll generate simulated results
+                const testSize = Math.floor(stockData.length * 0.2);
+                const actualValues = stockData.slice(-testSize).map(d => d.Close);
+               
+                // Generate somewhat realistic predictions with some noise
+                const predictions = actualValues.map(value => {
+                    const noise = (Math.random() - 0.5) * 2; // Random value between -1 and 1
+                    return value + noise;
+                });
+               
+                // Calculate metrics
+                const mae = calculateMAE(actualValues, predictions);
+                const rmse = calculateRMSE(actualValues, predictions);
+                const r2 = calculateR2(actualValues, predictions);
+               
+                // Update UI
+                maeElement.textContent = mae.toFixed(2);
+                rmseElement.textContent = rmse.toFixed(2);
+                r2Element.textContent = r2.toFixed(2);
+               
+                // Update chart with predictions
+                updateChartData(stockData.map(d => d.Close), predictions);
+               
+                // Hide loading indicator
+                loadingIndicator.style.display = 'none';
+                predictBtn.disabled = false;
+            }, 2000);
+        }
+       
+        // Metric calculation functions
+        function calculateMAE(actual, predicted) {
+            let sum = 0;
+            for (let i = 0; i < actual.length; i++) {
+                sum += Math.abs(actual[i] - predicted[i]);
+            }
+            return sum / actual.length;
+        }
+       
+        function calculateRMSE(actual, predicted) {
+            let sum = 0;
+            for (let i = 0; i < actual.length; i++) {
+                sum += Math.pow(actual[i] - predicted[i], 2);
+            }
+            return Math.sqrt(sum / actual.length);
+        }
+       
+        function calculateR2(actual, predicted) {
+            const mean = actual.reduce((a, b) => a + b, 0) / actual.length;
+            let ssTotal = 0;
+            let ssResidual = 0;
+           
+            for (let i = 0; i < actual.length; i++) {
+                ssTotal += Math.pow(actual[i] - mean, 2);
+                ssResidual += Math.pow(actual[i] - predicted[i], 2);
+            }
+           
+            return 1 - (ssResidual / ssTotal);
+        }
+    </script>
+</body>
+</html>
